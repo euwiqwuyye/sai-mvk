@@ -111,6 +111,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const player = video.parentElement;
     if (!player) return;
 
+    // iOS Safari's default behavior is to force a <video> into its own
+    // native fullscreen the instant it starts playing — that's what was
+    // causing fullscreen on a simple tap-to-play, with no relation to the
+    // fullscreen button at all. `playsinline` tells iOS to keep it inline
+    // instead, so playback and fullscreen become two separate, deliberate
+    // actions again. Setting both the attribute and the property covers
+    // older iOS/WebKit versions that only recognize one or the other.
+    video.setAttribute('playsinline', '');
+    video.setAttribute('webkit-playsinline', '');
+    video.playsInline = true;
+
     // --- Play button overlay (center circle) ---
     const playOverlay = Array.from(player.querySelectorAll('div')).find((el) => {
       const s = el.getAttribute('style') || '';
