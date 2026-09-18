@@ -131,6 +131,20 @@ document.addEventListener('DOMContentLoaded', () => {
         right: 0 !important;
         width: 100% !important;
       }
+      /* Invisible, much bigger hit area around thin seek/progress bars —
+         the visible 3px line stays exactly as designed, but taps/drags
+         are recognized well above and below it too. */
+      .vp-touch-target-expand {
+        touch-action: none;
+      }
+      .vp-touch-target-expand::before {
+        content: '';
+        position: absolute;
+        top: -16px;
+        bottom: -16px;
+        left: 0;
+        right: 0;
+      }
     `;
     document.head.appendChild(style);
   }
@@ -278,6 +292,12 @@ document.addEventListener('DOMContentLoaded', () => {
       if (playPauseBtn) playPauseBtn.innerHTML = PLAY_ICON;
     });
 
+    // Smooth easing between timeupdate ticks during normal playback —
+    // turned off while actively dragging (see below) so the bar can
+    // follow the finger/cursor exactly instead of lagging behind it.
+    if (fill) fill.style.transition = 'width 0.15s linear';
+    if (dot) dot.style.transition = 'left 0.15s linear';
+
     video.addEventListener('timeupdate', () => {
       if (!video.duration) return;
       const pct = (video.currentTime / video.duration) * 100;
@@ -291,17 +311,49 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Progress bar seek ---
     if (track) {
+      // Give the thin visible bar a much bigger invisible touch target,
+      // without changing how it looks.
+      if (getComputedStyle(track).position === 'static') {
+        track.style.position = 'relative';
+      }
+      track.classList.add('vp-touch-target-expand');
+
+      const updateProgressUI = (ratio) => {
+        if (fill) fill.style.width = `${ratio * 100}%`;
+        if (dot) dot.style.left = `${ratio * 100}%`;
+      };
+
       const seek = (clientX) => {
         const rect = track.getBoundingClientRect();
         const ratio = Math.min(Math.max((clientX - rect.left) / rect.width, 0), 1);
+        updateProgressUI(ratio);
         if (video.duration) video.currentTime = ratio * video.duration;
       };
+
       let draggingSeek = false;
-      track.addEventListener('mousedown', (e) => { e.stopPropagation(); draggingSeek = true; seek(e.clientX); });
+      const startDrag = () => {
+        draggingSeek = true;
+        if (fill) fill.style.transition = 'none';
+        if (dot) dot.style.transition = 'none';
+      };
+      const endDrag = () => {
+        if (!draggingSeek) return;
+        draggingSeek = false;
+        if (fill) fill.style.transition = 'width 0.15s linear';
+        if (dot) dot.style.transition = 'left 0.15s linear';
+      };
+
+      track.addEventListener('mousedown', (e) => { e.stopPropagation(); startDrag(); seek(e.clientX); });
       window.addEventListener('mousemove', (e) => { if (draggingSeek) seek(e.clientX); });
-      window.addEventListener('mouseup', () => { draggingSeek = false; });
-      track.addEventListener('touchstart', (e) => { e.stopPropagation(); seek(e.touches[0].clientX); });
-      track.addEventListener('touchmove', (e) => { seek(e.touches[0].clientX); });
+      window.addEventListener('mouseup', endDrag);
+      // preventDefault (with the listener explicitly marked non-passive)
+      // stops the browser from treating this drag as a page scroll/pan —
+      // touch-action: none in CSS alone doesn't always block it, especially
+      // once the finger moves fast or near the screen edge.
+      track.addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); startDrag(); seek(e.touches[0].clientX); }, { passive: false });
+      track.addEventListener('touchmove', (e) => { e.preventDefault(); seek(e.touches[0].clientX); }, { passive: false });
+      track.addEventListener('touchend', endDrag);
+      track.addEventListener('touchcancel', endDrag);
     }
 
     // --- Volume: mute button + slider stay in sync ---
