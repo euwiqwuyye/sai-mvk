@@ -14,7 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // calls .play() early, this pauses it right back — the moment the
   // overlay is dismissed, the guard is dropped and playback is started
   // for real.
-  const bgAudio = document.querySelector('audio');
+  const bgAudio = document.querySelector('audio[src*="6LACK-Free.mp3"]');
   const blockEarlyPlay = () => bgAudio.pause();
   if (bgAudio) {
     bgAudio.pause();
