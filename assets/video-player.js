@@ -427,27 +427,43 @@ document.addEventListener('DOMContentLoaded', () => {
       // whichever property it didn't manage to win (e.g. 'display').
       const PLAYER_FS_PROPS = ['width', 'height', 'max-width', 'max-height', 'display', 'align-items', 'justify-content', 'background'];
       const VIDEO_FS_PROPS = ['width', 'height', 'max-width', 'max-height', 'object-fit'];
+      let savedPlayerStyles = {};
+      let savedVideoStyles = {};
 
       const applyFsStyles = () => {
-        const set = (el, prop, val) => el.style.setProperty(prop, val, 'important');
-        set(player, 'width', '100vw');
-        set(player, 'height', '100vh');
-        set(player, 'max-width', 'none');
-        set(player, 'max-height', 'none');
-        set(player, 'display', 'flex');
-        set(player, 'align-items', 'center');
-        set(player, 'justify-content', 'center');
-        set(player, 'background', '#000');
-        set(video, 'width', 'auto');
-        set(video, 'height', '100%');
-        set(video, 'max-width', '100%');
-        set(video, 'max-height', 'none');
-        set(video, 'object-fit', 'contain');
+        const set = (el, saved, prop, val) => {
+          // Capture whatever the page itself had inline for this
+          // property (often the case for a thumbnail's object-fit/crop)
+          // so it can be put back exactly, rather than just deleted,
+          // once fullscreen ends.
+          saved[prop] = el.style.getPropertyValue(prop);
+          el.style.setProperty(prop, val, 'important');
+        };
+        savedPlayerStyles = {};
+        savedVideoStyles = {};
+        set(player, savedPlayerStyles, 'width', '100vw');
+        set(player, savedPlayerStyles, 'height', '100vh');
+        set(player, savedPlayerStyles, 'max-width', 'none');
+        set(player, savedPlayerStyles, 'max-height', 'none');
+        set(player, savedPlayerStyles, 'display', 'flex');
+        set(player, savedPlayerStyles, 'align-items', 'center');
+        set(player, savedPlayerStyles, 'justify-content', 'center');
+        set(player, savedPlayerStyles, 'background', '#000');
+        set(video, savedVideoStyles, 'width', 'auto');
+        set(video, savedVideoStyles, 'height', '100%');
+        set(video, savedVideoStyles, 'max-width', '100%');
+        set(video, savedVideoStyles, 'max-height', 'none');
+        set(video, savedVideoStyles, 'object-fit', 'contain');
       };
 
       const clearFsStyles = () => {
-        PLAYER_FS_PROPS.forEach((p) => player.style.removeProperty(p));
-        VIDEO_FS_PROPS.forEach((p) => video.style.removeProperty(p));
+        const restore = (el, saved, prop) => {
+          const orig = saved[prop];
+          if (orig) el.style.setProperty(prop, orig);
+          else el.style.removeProperty(prop);
+        };
+        PLAYER_FS_PROPS.forEach((p) => restore(player, savedPlayerStyles, p));
+        VIDEO_FS_PROPS.forEach((p) => restore(video, savedVideoStyles, p));
       };
 
       // Chrome internally promotes the fullscreen element out of any
