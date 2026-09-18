@@ -418,6 +418,38 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Fullscreen (the actual rightmost button) ---
     if (fullscreenBtn) {
+      // Belt-and-suspenders for whatever CSS the page itself ships.
+      // An inline style set with priority 'important' always beats a
+      // stylesheet rule's !important, no matter that rule's selector
+      // specificity or load order — that's a hard rule of the cascade,
+      // not a contest we can lose. The injected <style> tag above still
+      // runs first as a fast path; this is the guaranteed fallback for
+      // whichever property it didn't manage to win (e.g. 'display').
+      const PLAYER_FS_PROPS = ['width', 'height', 'max-width', 'max-height', 'display', 'align-items', 'justify-content', 'background'];
+      const VIDEO_FS_PROPS = ['width', 'height', 'max-width', 'max-height', 'object-fit'];
+
+      const applyFsStyles = () => {
+        const set = (el, prop, val) => el.style.setProperty(prop, val, 'important');
+        set(player, 'width', '100vw');
+        set(player, 'height', '100vh');
+        set(player, 'max-width', 'none');
+        set(player, 'max-height', 'none');
+        set(player, 'display', 'flex');
+        set(player, 'align-items', 'center');
+        set(player, 'justify-content', 'center');
+        set(player, 'background', '#000');
+        set(video, 'width', 'auto');
+        set(video, 'height', '100%');
+        set(video, 'max-width', '100%');
+        set(video, 'max-height', 'none');
+        set(video, 'object-fit', 'contain');
+      };
+
+      const clearFsStyles = () => {
+        PLAYER_FS_PROPS.forEach((p) => player.style.removeProperty(p));
+        VIDEO_FS_PROPS.forEach((p) => video.style.removeProperty(p));
+      };
+
       // Chrome internally promotes the fullscreen element out of any
       // transformed/filtered ancestor (transform, perspective, filter,
       // backdrop-filter, will-change: transform all create a new
@@ -460,9 +492,9 @@ document.addEventListener('DOMContentLoaded', () => {
           fsOriginalParent.insertBefore(fsPlaceholder, el);
           document.body.appendChild(el);
         }
-        if (el.requestFullscreen) return el.requestFullscreen().catch((err) => { restoreIfMoved(); console.warn('Fullscreen request failed:', err); });
-        if (el.webkitRequestFullscreen) return el.webkitRequestFullscreen();
-        if (el.msRequestFullscreen) return el.msRequestFullscreen();
+        if (el.requestFullscreen) return el.requestFullscreen().then(applyFsStyles).catch((err) => { restoreIfMoved(); console.warn('Fullscreen request failed:', err); });
+        if (el.webkitRequestFullscreen) { el.webkitRequestFullscreen(); applyFsStyles(); return; }
+        if (el.msRequestFullscreen) { el.msRequestFullscreen(); applyFsStyles(); return; }
 
         // No standard Fullscreen API — iPhone Safari (which never
         // implemented it for regular elements) and most sandboxed in-app
@@ -493,7 +525,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Only restore once the browser confirms we've actually left
         // fullscreen — doing it eagerly would yank the element out from
         // under an in-progress fullscreen transition.
-        if (!fsElement) restoreIfMoved();
+        if (!fsElement) { clearFsStyles(); restoreIfMoved(); }
       };
       document.addEventListener('fullscreenchange', syncFsIcon);
       document.addEventListener('webkitfullscreenchange', syncFsIcon);
