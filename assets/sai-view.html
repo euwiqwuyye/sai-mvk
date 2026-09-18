@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #0a0a0a;
+  }
+  pre {
+    color: #d0d0d0;
+    font-family: "Courier New", monospace;
+    font-size: 13px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 0;
+    padding: 12px;
+  }
+</style>
+</head>
+<body>
+<pre id="content">Loading...</pre>
+<script>
+  fetch('SAI.txt')
+    .then((r) => {
+      if (!r.ok) throw new Error('File not found');
+      return r.text();
+    })
+    .then((text) => {
+      document.getElementById('content').textContent = text;
+    })
+    .catch(() => {
+      document.getElementById('content').textContent = 'Could not load file.';
+    });
+</script>
+</body>
+</html>
