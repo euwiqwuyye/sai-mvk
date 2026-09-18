@@ -155,8 +155,29 @@ document.addEventListener('DOMContentLoaded', () => {
   let pseudoFsPlayer = null;
   let pseudoFsScrollY = 0;
 
+  // If the visitor has pinch-zoomed the page, toggling a position:fixed
+  // fullscreen overlay on top of that zoomed state is what leaves things
+  // "stuck" on iOS/mobile Safari — the browser doesn't cleanly reconcile
+  // the fixed overlay with a non-1x zoom, and won't let go until a reload.
+  // Briefly tightening the viewport meta tag's max zoom forces the browser
+  // to snap back to 1x right now, then we restore the original tag so the
+  // visitor can still pinch-zoom normally afterwards.
+  let originalViewportContent = null;
+  const resetPageZoom = () => {
+    const meta = document.querySelector('meta[name="viewport"]');
+    if (!meta) return;
+    if (originalViewportContent === null) {
+      originalViewportContent = meta.getAttribute('content') || '';
+    }
+    meta.setAttribute('content', `${originalViewportContent}, maximum-scale=1`);
+    requestAnimationFrame(() => {
+      meta.setAttribute('content', originalViewportContent);
+    });
+  };
+
   const enterPseudoFullscreen = (playerEl) => {
     if (pseudoFsPlayer) return;
+    resetPageZoom();
     pseudoFsPlayer = playerEl;
     pseudoFsScrollY = window.scrollY;
     playerEl.classList.add('vp-pseudo-fullscreen');
@@ -167,6 +188,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const exitPseudoFullscreen = () => {
     if (!pseudoFsPlayer) return;
+    resetPageZoom();
     pseudoFsPlayer.classList.remove('vp-pseudo-fullscreen');
     document.body.classList.remove('vp-pseudo-fullscreen-lock');
     document.body.style.top = '';
@@ -396,10 +418,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (fullscreenBtn) {
       const exitFs = () => {
         if (pseudoFsPlayer === player) { exitPseudoFullscreen(); return; }
+        resetPageZoom();
         (document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen)?.call(document);
       };
 
       const requestFs = (el) => {
+        resetPageZoom();
         // Standard path — works on desktop everywhere, and on iOS Safari
         // 16.4+ for regular elements (not just <video>).
         if (el.requestFullscreen) return el.requestFullscreen();

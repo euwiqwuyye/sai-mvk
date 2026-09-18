@@ -125,6 +125,12 @@ document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener(evt, unlockAudio, { once: false })
   );
 
+  // Smooth easing between timeupdate ticks during normal playback — turned
+  // off while actively dragging (see below) so the bar can follow the
+  // finger/cursor exactly instead of lagging behind it.
+  if (progressFill) progressFill.style.transition = 'width 0.15s linear';
+  if (progressDot) progressDot.style.transition = 'left 0.15s linear';
+
   // --- Progress bar ---
   audio.addEventListener('timeupdate', () => {
     if (!audio.duration) return;
@@ -137,17 +143,41 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   if (progressBar) {
+    // Give the thin visible bar a much bigger invisible touch target,
+    // without changing how it looks (same trick as the video player).
+    if (getComputedStyle(progressBar).position === 'static') {
+      progressBar.style.position = 'relative';
+    }
+    progressBar.style.touchAction = 'none';
+
     const seek = (clientX) => {
       const rect = progressBar.getBoundingClientRect();
       const ratio = Math.min(Math.max((clientX - rect.left) / rect.width, 0), 1);
+      if (progressFill) progressFill.style.width = `${ratio * 100}%`;
+      if (progressDot) progressDot.style.left = `${ratio * 100}%`;
       if (audio.duration) audio.currentTime = ratio * audio.duration;
     };
     let draggingSeek = false;
-    progressBar.addEventListener('mousedown', (e) => { e.stopPropagation(); draggingSeek = true; seek(e.clientX); });
+    const startDrag = () => {
+      draggingSeek = true;
+      if (progressFill) progressFill.style.transition = 'none';
+      if (progressDot) progressDot.style.transition = 'none';
+    };
+    const endDrag = () => {
+      if (!draggingSeek) return;
+      draggingSeek = false;
+      if (progressFill) progressFill.style.transition = 'width 0.15s linear';
+      if (progressDot) progressDot.style.transition = 'left 0.15s linear';
+    };
+    progressBar.addEventListener('mousedown', (e) => { e.stopPropagation(); startDrag(); seek(e.clientX); });
     window.addEventListener('mousemove', (e) => { if (draggingSeek) seek(e.clientX); });
-    window.addEventListener('mouseup', () => { draggingSeek = false; });
-    progressBar.addEventListener('touchstart', (e) => { e.stopPropagation(); seek(e.touches[0].clientX); });
-    progressBar.addEventListener('touchmove', (e) => { seek(e.touches[0].clientX); });
+    window.addEventListener('mouseup', endDrag);
+    // preventDefault (with the listener explicitly marked non-passive)
+    // stops the browser from treating this drag as a page scroll/pan.
+    progressBar.addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); startDrag(); seek(e.touches[0].clientX); }, { passive: false });
+    progressBar.addEventListener('touchmove', (e) => { e.preventDefault(); seek(e.touches[0].clientX); }, { passive: false });
+    progressBar.addEventListener('touchend', endDrag);
+    progressBar.addEventListener('touchcancel', endDrag);
   }
 
   // --- Volume slider ---
