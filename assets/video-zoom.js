@@ -1,7 +1,7 @@
 // video-zoom.js
 // Adds scroll-to-zoom (anchored to the cursor) + drag-to-pan on desktop,
-// and pinch-to-zoom + drag-to-pan on touch — but ONLY while the video's
-// existing custom fullscreen (from video-player.js) is active.
+// and pinch-to-zoom + smooth two-finger pan on touch — but ONLY while the
+// video's existing custom fullscreen (from video-player.js) is active.
 //
 // NOTE ON iOS: iOS Safari's fallback fullscreen (video.webkitEnterFullscreen)
 // hands the video off to Apple's native player UI, which JS cannot draw on
@@ -25,6 +25,18 @@ document.addEventListener('DOMContentLoaded', () => {
     let isPanning = false;
     let lastX = 0, lastY = 0;
     let pinchStartDist = 0, pinchStartScale = 1;
+    let lastMidX = 0, lastMidY = 0;
+
+    // Cached un-transformed video box (scale=1, tx=0, ty=0). Reading this
+    // via getBoundingClientRect() on every touchmove would force a layout
+    // reflow mid-gesture and cause jank, so we measure it once and derive
+    // everything else from tx/ty/scale math instead.
+    let baseRect = null;
+    const getBaseRect = () => {
+      if (!baseRect) baseRect = video.getBoundingClientRect();
+      return baseRect;
+    };
+    const invalidateBaseRect = () => { baseRect = null; };
 
     const isFsActive = () =>
       document.fullscreenElement === player || document.webkitFullscreenElement === player;
@@ -36,15 +48,33 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const reset = () => { scale = 1; tx = 0; ty = 0; apply(); };
 
-    // Zooms toward (clientX, clientY) — the classic "keep the point under
-    // the cursor/fingers fixed on screen while scale changes" formula.
+    const clampScale = (s) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
+
+    // Single-point zoom anchor: keeps the content under (clientX, clientY)
+    // fixed on screen while scale changes. Used for wheel + double-click.
     const zoomAt = (clientX, clientY, newScale) => {
-      const rect = video.getBoundingClientRect();
-      const localX = (clientX - rect.left) / scale;
-      const localY = (clientY - rect.top) / scale;
-      newScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, newScale));
-      tx -= localX * (newScale - scale);
-      ty -= localY * (newScale - scale);
+      const rect = getBaseRect();
+      newScale = clampScale(newScale);
+      const localX = (clientX - rect.left - tx) / scale;
+      const localY = (clientY - rect.top - ty) / scale;
+      tx = clientX - rect.left - localX * newScale;
+      ty = clientY - rect.top - localY * newScale;
+      scale = newScale;
+      if (scale <= 1) { reset(); return; }
+      apply();
+    };
+
+    // Two-point pan+zoom anchor: the content that was under (prevX, prevY)
+    // moves to (curX, curY) as scale changes to newScale — this is what
+    // makes two-finger pinch and pan blend smoothly into one gesture
+    // instead of only zooming toward a fixed spot.
+    const panZoomAnchored = (prevX, prevY, curX, curY, newScale) => {
+      const rect = getBaseRect();
+      newScale = clampScale(newScale);
+      const localX = (prevX - rect.left - tx) / scale;
+      const localY = (prevY - rect.top - ty) / scale;
+      tx = curX - rect.left - localX * newScale;
+      ty = curY - rect.top - localY * newScale;
       scale = newScale;
       if (scale <= 1) { reset(); return; }
       apply();
@@ -54,7 +84,7 @@ document.addEventListener('DOMContentLoaded', () => {
     player.addEventListener('wheel', (e) => {
       if (!isFsActive()) return;
       e.preventDefault();
-      const delta = -e.deltaY * 0.0025 * scale; // scales with current zoom for a smoother feel
+      const delta = -e.deltaY * 0.0025 * scale;
       zoomAt(e.clientX, e.clientY, scale + delta);
     }, { passive: false });
 
@@ -86,17 +116,20 @@ document.addEventListener('DOMContentLoaded', () => {
       else zoomAt(e.clientX, e.clientY, 2.5);
     });
 
-    // --- Touch: pinch to zoom, one-finger drag to pan ---
-    // (Only reachable where standard fullscreen is used, e.g. Android)
+    // --- Touch: pinch to zoom + pan together, one-finger drag to pan ---
+    // (Only reachable where standard fullscreen is used, e.g. Android/iPad)
     player.addEventListener('touchstart', (e) => {
       if (!isFsActive()) return;
       if (e.touches.length === 2) {
+        isPanning = false;
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
-        pinchStartDist = Math.hypot(dx, dy);
+        pinchStartDist = Math.hypot(dx, dy) || 1;
         pinchStartScale = scale;
-      } else if (e.touches.length === 1 && scale > 1) {
-        isPanning = true;
+        lastMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        lastMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      } else if (e.touches.length === 1) {
+        isPanning = scale > 1;
         lastX = e.touches[0].clientX;
         lastY = e.touches[0].clientY;
       }
@@ -108,10 +141,13 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
-        const dist = Math.hypot(dx, dy);
+        const dist = Math.hypot(dx, dy) || 1;
         const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
         const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-        zoomAt(midX, midY, pinchStartScale * (dist / pinchStartDist));
+        const newScale = pinchStartScale * (dist / pinchStartDist);
+        panZoomAnchored(lastMidX, lastMidY, midX, midY, newScale);
+        lastMidX = midX;
+        lastMidY = midY;
       } else if (isPanning && e.touches.length === 1) {
         e.preventDefault();
         tx += e.touches[0].clientX - lastX;
@@ -122,11 +158,30 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }, { passive: false });
 
-    player.addEventListener('touchend', () => { isPanning = false; });
+    // If a finger is lifted mid-gesture (2 -> 1) rebase instead of stopping,
+    // so the transition from pinching to one-finger panning is seamless.
+    const handleTouchReduce = (e) => {
+      if (!isFsActive()) return;
+      if (e.touches.length === 1) {
+        isPanning = scale > 1;
+        lastX = e.touches[0].clientX;
+        lastY = e.touches[0].clientY;
+      } else if (e.touches.length === 0) {
+        isPanning = false;
+      }
+    };
+    player.addEventListener('touchend', handleTouchReduce);
+    player.addEventListener('touchcancel', handleTouchReduce);
 
-    // --- Reset zoom whenever fullscreen is exited ---
-    const onFsChange = () => { if (!isFsActive()) reset(); };
+    // --- Reset zoom whenever fullscreen is exited, and re-measure the
+    // base rect on any change that could move/resize the player ---
+    const onFsChange = () => {
+      invalidateBaseRect();
+      if (!isFsActive()) reset();
+    };
     document.addEventListener('fullscreenchange', onFsChange);
     document.addEventListener('webkitfullscreenchange', onFsChange);
+    window.addEventListener('resize', invalidateBaseRect);
+    window.addEventListener('orientationchange', invalidateBaseRect);
   });
 });
