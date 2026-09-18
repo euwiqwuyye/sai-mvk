@@ -418,6 +418,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Fullscreen (the actual rightmost button) ---
     if (fullscreenBtn) {
+      // Chrome internally promotes the fullscreen element out of any
+      // transformed/filtered ancestor (transform, perspective, filter,
+      // backdrop-filter, will-change: transform all create a new
+      // containing block). Firefox does NOT do this promotion — if the
+      // player sits inside one of those ancestors anywhere on the page,
+      // Firefox renders "fullscreen" positioned/sized relative to that
+      // ancestor's box instead of the real viewport, which looks exactly
+      // like a small pinned video on an otherwise black screen. Moving
+      // the player to be a direct child of <body> before requesting
+      // fullscreen sidesteps this entirely, on every browser. A comment
+      // node left in its original spot marks exactly where to put it
+      // back on exit.
+      let fsPlaceholder = null;
+      let fsOriginalParent = null;
+      let fsOriginalNextSibling = null;
+
+      const restoreIfMoved = () => {
+        if (!fsPlaceholder) return;
+        fsOriginalParent.insertBefore(player, fsPlaceholder);
+        fsPlaceholder.remove();
+        fsPlaceholder = null;
+        fsOriginalParent = null;
+        fsOriginalNextSibling = null;
+      };
+
       const exitFs = () => {
         if (pseudoFsPlayer === player) { exitPseudoFullscreen(); return; }
         resetPageZoom();
@@ -428,7 +453,14 @@ document.addEventListener('DOMContentLoaded', () => {
         resetPageZoom();
         // Standard path — works on desktop everywhere, and on iOS Safari
         // 16.4+ for regular elements (not just <video>).
-        if (el.requestFullscreen) return el.requestFullscreen();
+        if (el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen) {
+          fsPlaceholder = document.createComment('vp-fullscreen-placeholder');
+          fsOriginalParent = el.parentElement;
+          fsOriginalNextSibling = el.nextSibling;
+          fsOriginalParent.insertBefore(fsPlaceholder, el);
+          document.body.appendChild(el);
+        }
+        if (el.requestFullscreen) return el.requestFullscreen().catch((err) => { restoreIfMoved(); console.warn('Fullscreen request failed:', err); });
         if (el.webkitRequestFullscreen) return el.webkitRequestFullscreen();
         if (el.msRequestFullscreen) return el.msRequestFullscreen();
 
@@ -439,6 +471,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // including the pinch-zoom/pan controls — while active. The
         // trade-off: this can't hide Safari's own chrome (address bar,
         // home indicator) the way true native fullscreen does.
+        restoreIfMoved();
         enterPseudoFullscreen(el);
       };
 
@@ -454,11 +487,13 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
       const syncFsIcon = () => {
-        const isFs =
-          document.fullscreenElement === player ||
-          document.webkitFullscreenElement === player ||
-          pseudoFsPlayer === player;
+        const fsElement = document.fullscreenElement || document.webkitFullscreenElement;
+        const isFs = fsElement === player || pseudoFsPlayer === player;
         fullscreenBtn.innerHTML = isFs ? COLLAPSE_ICON : EXPAND_ICON;
+        // Only restore once the browser confirms we've actually left
+        // fullscreen — doing it eagerly would yank the element out from
+        // under an in-progress fullscreen transition.
+        if (!fsElement) restoreIfMoved();
       };
       document.addEventListener('fullscreenchange', syncFsIcon);
       document.addEventListener('webkitfullscreenchange', syncFsIcon);
