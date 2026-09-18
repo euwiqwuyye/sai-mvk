@@ -92,6 +92,8 @@ document.addEventListener('DOMContentLoaded', () => {
         max-width: 100% !important;
         width: auto !important;
         height: 100% !important;
+        min-width: 0 !important;
+        min-height: 0 !important;
         object-fit: contain !important;
       }
       /* CSS-faked fullscreen for iPhone Safari, which never implemented
