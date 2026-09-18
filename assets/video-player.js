@@ -6,6 +6,68 @@
 document.addEventListener('DOMContentLoaded', () => {
   const videos = document.querySelectorAll('video');
 
+  // --- Detect sandboxed in-app browsers (Instagram, TikTok, Facebook, ---
+  // --- Threads, Twitter/X, Snapchat, Line, WeChat, LinkedIn) where the ---
+  // --- host app deliberately disables the Fullscreen API in its       ---
+  // --- WebView. No amount of JS here can turn that back on — the only ---
+  // --- real fix is telling the person to open the link in Safari.     ---
+  const isInAppBrowser = () => {
+    const ua = navigator.userAgent || '';
+    return /Instagram|FBAN|FBAV|FB_IAB|Twitter|TikTok|Line\/|MicroMessenger|Snapchat|LinkedInApp/i.test(ua);
+  };
+  const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+
+  if (!document.getElementById('video-player-iab-style')) {
+    const s = document.createElement('style');
+    s.id = 'video-player-iab-style';
+    s.textContent = `
+      .vp-iab-banner {
+        position: fixed;
+        left: 50%;
+        bottom: 16px;
+        transform: translateX(-50%);
+        max-width: min(92vw, 420px);
+        background: rgba(20,20,20,0.95);
+        color: #fff;
+        font: 13px/1.4 -apple-system, system-ui, sans-serif;
+        padding: 10px 14px;
+        border-radius: 10px;
+        z-index: 999999;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .vp-iab-banner button {
+        background: rgba(255,255,255,0.15);
+        border: none;
+        color: #fff;
+        border-radius: 6px;
+        padding: 4px 8px;
+        font-size: 12px;
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+    `;
+    document.head.appendChild(s);
+  }
+
+  let iabBannerShown = false;
+  const showInAppBrowserNotice = () => {
+    if (iabBannerShown || !isInAppBrowser()) return false;
+    iabBannerShown = true;
+    const banner = document.createElement('div');
+    banner.className = 'vp-iab-banner';
+    banner.innerHTML = `
+      <span>Fullscreen isn't supported inside this app's browser. Open this page in Safari or Chrome for fullscreen video.</span>
+      <button type="button">Got it</button>
+    `;
+    banner.querySelector('button').addEventListener('click', () => banner.remove());
+    document.body.appendChild(banner);
+    setTimeout(() => banner.remove(), 8000);
+    return true;
+  };
+
   // Real CSS beats inline styles when marked !important, regardless of
   // where the inline style came from or when it was set. This is what
   // actually lets the fullscreen video grow past its normal inline
@@ -206,19 +268,56 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Fullscreen (the actual rightmost button) ---
     if (fullscreenBtn) {
-      const requestFs = (el) =>
-        (el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen)?.call(el);
       const exitFs = () =>
         (document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen)?.call(document);
+
+      // Track whether we fell back to native <video> fullscreen (iOS),
+      // since that path has its own events and no shared document-level
+      // fullscreenElement to check against.
+      let usingNativeVideoFs = false;
+
+      const requestFs = (el) => {
+        // Standard path — works on desktop everywhere, and on iOS Safari
+        // 16.4+ for regular elements (not just <video>).
+        if (el.requestFullscreen) return el.requestFullscreen();
+        if (el.webkitRequestFullscreen) return el.webkitRequestFullscreen();
+        if (el.msRequestFullscreen) return el.msRequestFullscreen();
+
+        // iOS Safari fallback: older iOS never implemented element-level
+        // fullscreen at all, only a proprietary native fullscreen for the
+        // <video> element itself. This must be called directly inside the
+        // click handler (a real user gesture) or iOS silently ignores it.
+        // It hands off to the OS's own video player UI, so custom controls
+        // (progress bar, mute button, etc.) won't be visible while it's
+        // fullscreen — that's an iOS limitation, not a bug in this code.
+        if (typeof video.webkitEnterFullscreen === 'function') {
+          usingNativeVideoFs = true;
+          return video.webkitEnterFullscreen();
+        }
+
+        // Nothing worked — most likely a sandboxed in-app browser that
+        // disables fullscreen outright. Let the person know why, instead
+        // of the button silently doing nothing.
+        if (!showInAppBrowserNotice() && isIOS()) {
+          showInAppBrowserNotice();
+        }
+      };
 
       fullscreenBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         const fsElement = document.fullscreenElement || document.webkitFullscreenElement;
-        if (!fsElement) {
+        if (!fsElement && !usingNativeVideoFs) {
           requestFs(player);
         } else {
           exitFs();
         }
+      });
+
+      // Native iOS video fullscreen fires its own events on the <video>
+      // element rather than document-level fullscreenchange.
+      video.addEventListener('webkitendfullscreen', () => {
+        usingNativeVideoFs = false;
+        fullscreenBtn.innerHTML = EXPAND_ICON;
       });
 
       const syncFsIcon = () => {
