@@ -538,10 +538,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const fsElement = document.fullscreenElement || document.webkitFullscreenElement;
         const isFs = fsElement === player || pseudoFsPlayer === player;
         fullscreenBtn.innerHTML = isFs ? COLLAPSE_ICON : EXPAND_ICON;
-        // Only restore once the browser confirms we've actually left
-        // fullscreen — doing it eagerly would yank the element out from
-        // under an in-progress fullscreen transition.
-        if (!fsElement) { clearFsStyles(); restoreIfMoved(); }
+        // Guard by fsPlaceholder, not just "no element is fullscreen" —
+        // this listener is registered once per player on the page, so
+        // an unguarded check would fire cleanup for every OTHER player
+        // too on any exit, stripping inline styles they never had
+        // touched (fsPlaceholder is only non-null for the player that
+        // actually entered fullscreen).
+        if (!fsElement && fsPlaceholder) { clearFsStyles(); restoreIfMoved(); }
       };
       document.addEventListener('fullscreenchange', syncFsIcon);
       document.addEventListener('webkitfullscreenchange', syncFsIcon);
