@@ -94,9 +94,71 @@ document.addEventListener('DOMContentLoaded', () => {
         height: 100% !important;
         object-fit: contain !important;
       }
+      /* CSS-faked fullscreen for iPhone Safari, which never implemented
+         element-level Fullscreen API — only a proprietary native <video>
+         fullscreen that blocks all custom JS (zoom/pan included) while
+         active. This expands the player itself instead, so everything
+         stays under our own control. Same visual treatment as real
+         fullscreen above, just triggered by a class instead of a
+         pseudo-class. */
+      .vp-pseudo-fullscreen {
+        position: fixed !important;
+        inset: 0 !important;
+        z-index: 999997 !important;
+        max-width: none !important;
+        width: 100% !important;
+        height: 100% !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        background: #000 !important;
+        overflow: hidden !important;
+      }
+      .vp-pseudo-fullscreen video {
+        max-height: none !important;
+        max-width: 100% !important;
+        width: auto !important;
+        height: 100% !important;
+        object-fit: contain !important;
+      }
+      /* Locks the page in place behind a pseudo-fullscreen player so it
+         can't be scrolled while "fullscreen" is really just a fixed
+         overlay. Scroll position is restored on exit. */
+      body.vp-pseudo-fullscreen-lock {
+        position: fixed !important;
+        left: 0 !important;
+        right: 0 !important;
+        width: 100% !important;
+      }
     `;
     document.head.appendChild(style);
   }
+
+  // Shared across every player instance on the page — only one player can
+  // be pseudo-fullscreen at a time, same as the real Fullscreen API only
+  // allows one fullscreenElement at a time.
+  let pseudoFsPlayer = null;
+  let pseudoFsScrollY = 0;
+
+  const enterPseudoFullscreen = (playerEl) => {
+    if (pseudoFsPlayer) return;
+    pseudoFsPlayer = playerEl;
+    pseudoFsScrollY = window.scrollY;
+    playerEl.classList.add('vp-pseudo-fullscreen');
+    document.body.classList.add('vp-pseudo-fullscreen-lock');
+    document.body.style.top = `-${pseudoFsScrollY}px`;
+    document.dispatchEvent(new Event('pseudofullscreenchange'));
+  };
+
+  const exitPseudoFullscreen = () => {
+    if (!pseudoFsPlayer) return;
+    pseudoFsPlayer.classList.remove('vp-pseudo-fullscreen');
+    document.body.classList.remove('vp-pseudo-fullscreen-lock');
+    document.body.style.top = '';
+    window.scrollTo(0, pseudoFsScrollY);
+    pseudoFsPlayer = null;
+    document.dispatchEvent(new Event('pseudofullscreenchange'));
+  };
 
   const PLAY_ICON = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M4 1.5L14 8L4 14.5V1.5Z"></path></svg>';
   const PAUSE_ICON = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="1.5" width="3.5" height="13"></rect><rect x="9.5" y="1.5" width="3.5" height="13"></rect></svg>';
@@ -279,13 +341,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Fullscreen (the actual rightmost button) ---
     if (fullscreenBtn) {
-      const exitFs = () =>
+      const exitFs = () => {
+        if (pseudoFsPlayer === player) { exitPseudoFullscreen(); return; }
         (document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen)?.call(document);
-
-      // Track whether we fell back to native <video> fullscreen (iOS),
-      // since that path has its own events and no shared document-level
-      // fullscreenElement to check against.
-      let usingNativeVideoFs = false;
+      };
 
       const requestFs = (el) => {
         // Standard path — works on desktop everywhere, and on iOS Safari
@@ -294,49 +353,37 @@ document.addEventListener('DOMContentLoaded', () => {
         if (el.webkitRequestFullscreen) return el.webkitRequestFullscreen();
         if (el.msRequestFullscreen) return el.msRequestFullscreen();
 
-        // iOS Safari fallback: older iOS never implemented element-level
-        // fullscreen at all, only a proprietary native fullscreen for the
-        // <video> element itself. This must be called directly inside the
-        // click handler (a real user gesture) or iOS silently ignores it.
-        // It hands off to the OS's own video player UI, so custom controls
-        // (progress bar, mute button, etc.) won't be visible while it's
-        // fullscreen — that's an iOS limitation, not a bug in this code.
-        if (typeof video.webkitEnterFullscreen === 'function') {
-          usingNativeVideoFs = true;
-          return video.webkitEnterFullscreen();
-        }
-
-        // Nothing worked — most likely a sandboxed in-app browser that
-        // disables fullscreen outright. Let the person know why, instead
-        // of the button silently doing nothing.
-        if (!showInAppBrowserNotice() && isIOS()) {
-          showInAppBrowserNotice();
-        }
+        // No standard Fullscreen API — iPhone Safari (which never
+        // implemented it for regular elements) and most sandboxed in-app
+        // browsers land here. Fake it with CSS instead of handing off to
+        // iOS's native video player, which would block all custom JS —
+        // including the pinch-zoom/pan controls — while active. The
+        // trade-off: this can't hide Safari's own chrome (address bar,
+        // home indicator) the way true native fullscreen does.
+        enterPseudoFullscreen(el);
       };
 
       fullscreenBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         const fsElement = document.fullscreenElement || document.webkitFullscreenElement;
-        if (!fsElement && !usingNativeVideoFs) {
+        const inPseudoFs = pseudoFsPlayer === player;
+        if (!fsElement && !inPseudoFs) {
           requestFs(player);
         } else {
           exitFs();
         }
       });
 
-      // Native iOS video fullscreen fires its own events on the <video>
-      // element rather than document-level fullscreenchange.
-      video.addEventListener('webkitendfullscreen', () => {
-        usingNativeVideoFs = false;
-        fullscreenBtn.innerHTML = EXPAND_ICON;
-      });
-
       const syncFsIcon = () => {
-        const isFs = document.fullscreenElement === player || document.webkitFullscreenElement === player;
+        const isFs =
+          document.fullscreenElement === player ||
+          document.webkitFullscreenElement === player ||
+          pseudoFsPlayer === player;
         fullscreenBtn.innerHTML = isFs ? COLLAPSE_ICON : EXPAND_ICON;
       };
       document.addEventListener('fullscreenchange', syncFsIcon);
       document.addEventListener('webkitfullscreenchange', syncFsIcon);
+      document.addEventListener('pseudofullscreenchange', syncFsIcon);
     }
   });
 });

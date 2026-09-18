@@ -14,6 +14,29 @@ document.addEventListener('DOMContentLoaded', () => {
   const MIN_SCALE = 1;
   const MAX_SCALE = 5;
 
+  // --- Lock page pinch-zoom ONLY while a video is in our custom fullscreen ---
+  // iOS Safari's native pinch-zoom is a viewport-level feature that keeps
+  // working inside Fullscreen API elements regardless of touch-action or
+  // preventDefault() on gesture events — the only reliable way to stop it
+  // from fighting our own pinch handling is toggling the viewport meta tag
+  // itself. We restore the page's original tag the instant fullscreen ends,
+  // so pinch-to-zoom on the rest of the page is never permanently lost.
+  const viewportMeta = document.querySelector('meta[name="viewport"]');
+  const defaultViewportContent = viewportMeta ? viewportMeta.getAttribute('content') : null;
+  const zoomLockedViewportContent = 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no';
+  const updatePageZoomLock = () => {
+    if (!viewportMeta) return;
+    const anyFsActive = !!(
+      document.fullscreenElement ||
+      document.webkitFullscreenElement ||
+      document.querySelector('.vp-pseudo-fullscreen')
+    );
+    viewportMeta.setAttribute('content', anyFsActive ? zoomLockedViewportContent : defaultViewportContent);
+  };
+  document.addEventListener('fullscreenchange', updatePageZoomLock);
+  document.addEventListener('webkitfullscreenchange', updatePageZoomLock);
+  document.addEventListener('pseudofullscreenchange', updatePageZoomLock);
+
   document.querySelectorAll('video').forEach((video) => {
     const player = video.parentElement;
     if (!player) return;
@@ -39,9 +62,23 @@ document.addEventListener('DOMContentLoaded', () => {
     const invalidateBaseRect = () => { baseRect = null; };
 
     const isFsActive = () =>
-      document.fullscreenElement === player || document.webkitFullscreenElement === player;
+      document.fullscreenElement === player ||
+      document.webkitFullscreenElement === player ||
+      player.classList.contains('vp-pseudo-fullscreen');
+
+    // Keeps the scaled video's edges from ever moving inside the frame —
+    // without this, panning a zoomed video far enough exposes the player's
+    // background behind it (the "black void" when panning too far).
+    const clampPan = () => {
+      const rect = getBaseRect();
+      const minTx = rect.width * (1 - scale);
+      const minTy = rect.height * (1 - scale);
+      tx = Math.min(0, Math.max(minTx, tx));
+      ty = Math.min(0, Math.max(minTy, ty));
+    };
 
     const apply = () => {
+      clampPan();
       video.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
       player.classList.toggle('vz-zoomed', scale > 1);
     };
@@ -158,6 +195,19 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }, { passive: false });
 
+    // --- iOS Safari fix: suppress the browser's own native pinch gesture ---
+    // Safari fires proprietary gesturestart/gesturechange/gestureend events
+    // for two-finger pinches, separate from touch events, and tries to zoom
+    // the whole page with them even when touch-action:none is set. That's
+    // what causes the "zooms into one spot but won't pan" symptom on iOS —
+    // the native gesture and our JS transform are fighting each other.
+    // These events don't exist outside WebKit, so this is a harmless no-op
+    // on Android/desktop.
+    const preventNativeGesture = (e) => { if (isFsActive()) e.preventDefault(); };
+    player.addEventListener('gesturestart', preventNativeGesture);
+    player.addEventListener('gesturechange', preventNativeGesture);
+    player.addEventListener('gestureend', preventNativeGesture);
+
     // If a finger is lifted mid-gesture (2 -> 1) rebase instead of stopping,
     // so the transition from pinching to one-finger panning is seamless.
     const handleTouchReduce = (e) => {
@@ -181,6 +231,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     document.addEventListener('fullscreenchange', onFsChange);
     document.addEventListener('webkitfullscreenchange', onFsChange);
+    document.addEventListener('pseudofullscreenchange', onFsChange);
     window.addEventListener('resize', invalidateBaseRect);
     window.addEventListener('orientationchange', invalidateBaseRect);
   });
