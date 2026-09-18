@@ -14,29 +14,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const MIN_SCALE = 1;
   const MAX_SCALE = 5;
 
-  // --- Lock page pinch-zoom ONLY while a video is in our custom fullscreen ---
-  // iOS Safari's native pinch-zoom is a viewport-level feature that keeps
-  // working inside Fullscreen API elements regardless of touch-action or
-  // preventDefault() on gesture events — the only reliable way to stop it
-  // from fighting our own pinch handling is toggling the viewport meta tag
-  // itself. We restore the page's original tag the instant fullscreen ends,
-  // so pinch-to-zoom on the rest of the page is never permanently lost.
-  const viewportMeta = document.querySelector('meta[name="viewport"]');
-  const defaultViewportContent = viewportMeta ? viewportMeta.getAttribute('content') : null;
-  const zoomLockedViewportContent = 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no';
-  const updatePageZoomLock = () => {
-    if (!viewportMeta) return;
-    const anyFsActive = !!(
-      document.fullscreenElement ||
-      document.webkitFullscreenElement ||
-      document.querySelector('.vp-pseudo-fullscreen')
-    );
-    viewportMeta.setAttribute('content', anyFsActive ? zoomLockedViewportContent : defaultViewportContent);
-  };
-  document.addEventListener('fullscreenchange', updatePageZoomLock);
-  document.addEventListener('webkitfullscreenchange', updatePageZoomLock);
-  document.addEventListener('pseudofullscreenchange', updatePageZoomLock);
-
   document.querySelectorAll('video').forEach((video) => {
     const player = video.parentElement;
     if (!player) return;

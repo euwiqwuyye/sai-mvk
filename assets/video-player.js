@@ -120,6 +120,7 @@ document.addEventListener('DOMContentLoaded', () => {
         width: auto !important;
         height: 100% !important;
         object-fit: contain !important;
+        touch-action: none !important;
       }
       /* Locks the page in place behind a pseudo-fullscreen player so it
          can't be scrolled while "fullscreen" is really just a fixed
