@@ -19,13 +19,26 @@
         <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:title" content="Schutz" />
         <meta name="twitter:description" content="The Downfall of Sai MVK" />
-        <style>
-  h2 {
-    border-bottom: 1px solid #cccccc;
-    padding-bottom: 10px;
-  }
-</style>
-    </head>
+           <style>
+h2 {
+  border-bottom: 1px solid #cccccc;
+  padding-bottom: 10px;
+}
+
+:fullscreen, :-webkit-full-screen {
+  overflow: hidden !important;
+}
+:fullscreen video, :-webkit-full-screen video {
+  cursor: zoom-in;
+}
+.vz-zoomed video {
+  cursor: grab;
+}
+.vz-panning video {
+  cursor: grabbing;
+}
+    </style>
+</head>
     <body>
 	<div id="click-to-continue" style="
     position: fixed;
@@ -4421,5 +4434,6 @@
 	   <script src="assets/audio-player.js"></script>
 	   <script src="assets/voice-message-player.js"></script>
 	   <script src="assets/click-to-continue.js"></script>
+	   <script src="assets/video-zoom.js"></script>
     </body>
 </html>
